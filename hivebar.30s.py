@@ -58,6 +58,8 @@ def env_number(name, default):
         return float(default)
 
 
+# Demo mode shows made-up data for screenshots; every action in it does nothing.
+DEMO = os.environ.get("HIVEBAR_DEMO") == "1"
 IDLE_CPU = env_number("HIVEBAR_IDLE_CPU", "1.0")
 STALE_SECS = int(env_number("HIVEBAR_STALE_HOURS", "24") * 3600)
 
@@ -682,13 +684,46 @@ def level(load, cores, free_pct):
 
 def action(label, *params):
     """A menu line that re-runs this script. Params must be fixed verbs, numbers or SAFE_NAME."""
+    if DEMO:
+        return f"{label} | refresh=false"
     ps = " ".join(f'param{i}="{v}"' for i, v in enumerate(params, 1))
     return f'{label} | bash="{SELF}" {ps} terminal=false refresh=true'
 
 
+def demo_data():
+    """Made-up sessions, limits and agents for screenshots (HIVEBAR_DEMO=1). Stop actions
+    point at PIDs that don't exist, so the safety checks turn them into no-ops."""
+    now, day = int(time.time()), 86400
+    rows = [  # account, project folder, age, MB, CPU, kind, version
+        ("work", "~/Code/web-app", 2 * 3600, 314, 3.0, "interactive", ""),
+        ("work", "~/Code/api/.claude/worktrees/fix-login", 3 * 3600, 280, 12.0, "interactive", ""),
+        ("work", "~/Code/billing", 26 * 3600, 245, 0.0, "background", ""),
+        ("personal", "~/Code/blog", 40 * 60, 198, 0.4, "interactive", ""),
+        ("personal", "~/Code/planner/.claude/worktrees/new-ui", 22 * day, 288, 0.0, "background", "2.1.293"),
+    ]
+    sessions = []
+    for i, (acct, cwd, age, mb, cpu, kind, version) in enumerate(rows):
+        sessions.append(dict(pid=str(999900 + i), ppid="1", start=now - age, age=age, mb=mb, cpu=cpu,
+                             tree_cpu=cpu, tty="ttys00%d" % i, args="claude", exe="claude", account=acct,
+                             cwd=cwd.replace("~", HOME, 1), kind=kind, version=version,
+                             outdated=bool(version), idle=cpu < IDLE_CPU,
+                             stale=cpu < IDLE_CPU and age > STALE_SECS))
+    sessions.append(dict(sessions[0], pid="999990", kind="service", mb=120, account="work"))
+    stats = ((7.2, 6.8, 6.1), 10, 4.2, 48)
+    usage = {"work": (1_400_000, 26_100_000), "personal": (90_000, 3_200_000), "api-key": (0, 850_000)}
+    limits = {"work": {"five_hour": {"used": 78.0, "resets_at": now + 2 * 3600},
+                       "seven_day": {"used": 41.0, "resets_at": now + 3 * day}, "updated": now - 60},
+              "personal": {"five_hour": {"used": 6.0, "resets_at": now + 4 * 3600},
+                           "seven_day": {"used": 12.0, "resets_at": now + 5 * day}, "updated": now - 1800}}
+    agents = [("work", [{"agent_status": "working", "cwd": HOME + "/Code/api", "terminal_title_stripped": "api"},
+                        {"agent_status": "done", "cwd": HOME + "/Code/web-app"}])]
+    return sessions, stats, usage, limits, agents
+
+
 def render():
-    sessions = collect_sessions()
-    load, cores, swap, free_pct = system_stats()
+    demo = demo_data() if DEMO else None
+    sessions = demo[0] if demo else collect_sessions()
+    load, cores, swap, free_pct = demo[1] if demo else system_stats()
     color = level(load, cores, free_pct)
     visible = [s for s in sessions if s["kind"] in ("interactive", "background")]
     stale = [s for s in visible if s["stale"]]
@@ -742,21 +777,21 @@ def render():
     print("---")
 
     try:
-        usage = account_usage()
+        usage = demo[2] if demo else account_usage()
     except Exception:  # usage is a nice-to-have; never let it blank the session list
         usage = {}
     try:
-        for line in usage_lines(usage, load_limits(), time.time()):
+        for line in usage_lines(usage, demo[3] if demo else load_limits(), time.time()):
             print(line)
     except Exception:  # never let a malformed cache blank the session list
         pass
 
-    herdr, workspaces = herdr_agents()
+    herdr, workspaces = (None, demo[4]) if demo else herdr_agents()
     if workspaces:
         print("Herdr agents")
         for name, agents in workspaces:
             line = f"--{menu_text(name)} — {len(agents)} agent(s)"
-            if SAFE_NAME.match(name):
+            if herdr and SAFE_NAME.match(name):
                 line += f' | bash="{herdr}" param1=session param2=attach param3="{name}" terminal=true'
             print(line)
             for a in agents:

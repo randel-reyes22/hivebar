@@ -105,6 +105,7 @@ Hivebar makes no network requests and sends no telemetry.
 ```sh
 python3 -m unittest discover tests
 ./hivebar.30s.py                 # prints the menu as SwiftBar sees it
+HIVEBAR_DEMO=1 ./hivebar.30s.py  # made-up sessions and accounts, for screenshots; actions do nothing
 swift tools/make_icons.swift     # regenerates the menu-bar icons
 ```
 
