@@ -41,10 +41,12 @@ if ! open -Ra SwiftBar 2>/dev/null; then
   fi
 fi
 
+new_dir=0
 if [ -z "$dir" ]; then
   dir="${HIVEBAR_PLUGIN_DIR:-$HOME/.config/swiftbar-plugins}"
   defaults write com.ameba.SwiftBar PluginDirectory -string "$dir"
-  echo "Set SwiftBar plugin folder to $dir (restart SwiftBar if it was already running)."
+  echo "Set SwiftBar plugin folder to $dir."
+  new_dir=1
 fi
 mkdir -p "$dir"
 
@@ -57,6 +59,20 @@ chmod +x "$SRC"
 ln -s "$SRC" "$dir/hivebar.$interval.py"
 echo "Linked $dir/hivebar.$interval.py -> $SRC"
 
+# A running SwiftBar only reads its plugin folder at launch.
+if [ "$new_dir" = 1 ] && pgrep -x SwiftBar >/dev/null; then
+  pkill -x SwiftBar; sleep 1
+fi
 open -a SwiftBar
+sleep 2
 open -g "swiftbar://refreshallplugins" 2>/dev/null || true
-echo "Done. Look for the hexagon in your menu bar."
+cat <<EOF
+
+Done. Hivebar is in the menu bar, top right: a hexagon icon followed by your session count.
+Not there?
+  - On a MacBook with a notch, too many icons get hidden behind it. Hold Cmd and drag
+    Hivebar further right, or quit some other menu-bar apps.
+  - If SwiftBar asked you to choose a plugin folder, choose: $dir
+  - Start SwiftBar with your Mac: open SwiftBar from Applications, then its Settings.
+  - Optional, plan usage per account: $(dirname "$SRC")/hivebar.30s.py setup-limits
+EOF

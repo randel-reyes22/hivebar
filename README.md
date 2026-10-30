@@ -36,6 +36,21 @@ cd hivebar
 
 `install.sh` installs SwiftBar with Homebrew if it's missing and sets a plugin folder if you don't have one. It then symlinks the plugin there, so `git pull` updates it. To change the refresh interval, run `./install.sh <interval>` again. To remove Hivebar, run `./install.sh --uninstall`.
 
+
+### Finding it in the menu bar
+
+Hivebar appears in the menu bar, top right of the screen: a hexagon icon followed by your session count, for example `⬡ 3` or `⬡ 4 · 1 idle`. Click it to open the menu. It refreshes every 30 seconds.
+
+If you don't see it:
+
+1. **Hidden behind the notch.** On MacBooks with a notch, menu-bar icons that don't fit are hidden. Hold **⌘ Command** and drag Hivebar to the right, or quit some other menu-bar apps.
+2. **SwiftBar isn't running.** Run `open -a SwiftBar`. The first time, macOS may ask whether to open an app downloaded from the internet; choose Open.
+3. **SwiftBar is using a different folder.** If SwiftBar asked you to choose a plugin folder, pick `~/.config/swiftbar-plugins`, or run `defaults read com.ameba.SwiftBar PluginDirectory` and rerun `./install.sh`.
+4. **Check the plugin itself:** `./hivebar.30s.py` should print the menu text. If it errors, please open an issue.
+
+To start it automatically when you log in, open SwiftBar from Applications (while it's running this opens its settings) and turn on **Launch at Login**.
+
+Then, optionally, run `./hivebar.30s.py setup-limits` to show each account's plan usage (see [Plan usage](#plan-usage)).
 ## Plan usage
 
 Claude Code passes your plan's limit percentages to its status line. Hivebar can sit in front of your status line, keep a copy of those numbers, and then run your own status line unchanged:
