@@ -6,6 +6,9 @@
 # <swiftbar.abouturl>https://github.com/steamboy/hivebar</swiftbar.abouturl>
 # <swiftbar.hideRunInTerminal>true</swiftbar.hideRunInTerminal>
 # <swiftbar.hideDisablePlugin>true</swiftbar.hideDisablePlugin>
+# <swiftbar.hideAbout>true</swiftbar.hideAbout>
+# <swiftbar.hideLastUpdated>true</swiftbar.hideLastUpdated>
+# <swiftbar.hideSwiftBar>true</swiftbar.hideSwiftBar>
 # <swiftbar.environment>[HIVEBAR_STALE_HOURS=24, HIVEBAR_IDLE_CPU=1.0]</swiftbar.environment>
 """Hivebar: a SwiftBar plugin to monitor and stop Claude Code sessions.
 
@@ -417,6 +420,8 @@ def render():
         print(f"No idle sessions older than {hours}h | disabled=true")
     print('Open Activity Monitor | bash=/usr/bin/open param1=-a param2="Activity Monitor" terminal=false')
     print("Refresh | refresh=true")
+    # SwiftBar's own submenu is hidden above, so keep a way to quit it (hold Option).
+    print("Quit SwiftBar | bash=/usr/bin/pkill param1=-x param2=SwiftBar terminal=false alternate=true")
 
 
 if __name__ == "__main__":
