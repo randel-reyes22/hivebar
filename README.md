@@ -4,30 +4,9 @@ See every Claude Code session on your Mac at a glance, across all your accounts,
 
 Hivebar is a [SwiftBar](https://swiftbar.app) plugin. When you run many coding agents at once, sessions pile up quietly: tabs you forgot about, background agents from last week, sessions still on an old CLI version. Each one holds a few hundred MB, and together they push your Mac into swap. Hivebar makes them visible and lets you stop them.
 
-```
-⬡✳ 4 · 1 idle
-──────────────────────────────────────────────────────
-Load 9.8 / 10 cores  (5m 10.1, 15m 11.0)
-54% memory free · swap 8.5 GB used
-──────────────────────────────────────────────────────
-Claude Code sessions: 4 · 1.5 GB total   (hold ⌥ to stop)
-work — 1 session(s) · 310 MB                       ▸
-personal — 3 session(s) · 1.2 GB                   ▸
-   web · 2h · 314 MB · 0%                          ▸  Stop session
-   app ⎇ fix-login · 3h · 280 MB · 12%                Reveal folder
-   planner ⎇ field-font · 22d · 288 MB · 0%  [bg, idle, old v2.1.293]
-   ──────────
-   Stop all 3 personal sessions…
-──────────────────────────────────────────────────────
-Plan usage   5h · week
-personal   5h 42% · week 18%                       ▸  5-hour limit resets 15:10
-work   5h 3% · week 61%                               Weekly limit resets Tue 09:00
-                                                      Updated 2m ago
-──────────────────────────────────────────────────────
-Herdr agents                                       ▸
-──────────────────────────────────────────────────────
-Stop 1 idle session(s) older than 24h…
-```
+<img src="docs/menu.png" width="417" alt="Hivebar menu: system load, Claude Code sessions per account, plan usage per account, Herdr agents">
+
+<sub>Screenshot from demo mode (`HIVEBAR_DEMO=1`): accounts and projects are made up.</sub>
 
 ## Features
 
