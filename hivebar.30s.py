@@ -18,8 +18,11 @@ Run with no arguments to print the menu. Actions (invoked from the menu):
   stop-idle               confirm, then SIGTERM idle sessions older than HIVEBAR_STALE_HOURS
   stop-account <name>     confirm, then SIGTERM every session in one account
 
-Reads local process information only (ps, lsof, sysctl). No network access.
+Reads local process information (ps, lsof, sysctl) and token counts from local
+transcripts. No network access.
 """
+import calendar
+import glob
 import json
 import os
 import re
@@ -37,6 +40,11 @@ SEARCH_PATH = os.pathsep.join([os.environ.get("PATH", ""), os.path.join(HOME, ".
 # A process counts as the same session if its start time matches within this many seconds.
 START_TOLERANCE = 3
 SAFE_NAME = re.compile(r"^[\w.@+-]+$")
+# Token usage is summed from transcripts into 10-minute buckets and cached between refreshes.
+USAGE_CACHE = os.path.join(HOME, "Library/Caches/hivebar/usage.json")
+USAGE_WINDOW = 7 * 86400
+USAGE_BUCKET = 600
+USAGE_CACHE_VERSION = 1
 
 
 def env_number(name, default):
@@ -254,6 +262,125 @@ def herdr_agents():
     return herdr, out
 
 
+def config_dirs():
+    """~/.claude and every ~/.claude-* that has transcripts."""
+    dirs = [os.path.join(HOME, ".claude")] + sorted(glob.glob(os.path.join(HOME, ".claude-*")))
+    return [d for d in dirs if os.path.isdir(os.path.join(d, "projects"))]
+
+
+def usage_entry(line):
+    """(epoch, message id, tokens) for a transcript line with API usage, else None.
+    Tokens are input + cache writes + output; cache reads are left out (cheap, and they dominate)."""
+    if b'"output_tokens"' not in line:
+        return None
+    try:
+        d = json.loads(line)
+        u = d["message"]["usage"]
+        epoch = calendar.timegm(time.strptime(d["timestamp"][:19], "%Y-%m-%dT%H:%M:%S"))
+        tokens = sum(int(u.get(k) or 0) for k in
+                     ("input_tokens", "cache_creation_input_tokens", "output_tokens"))
+    except (ValueError, KeyError, TypeError, AttributeError, OverflowError):
+        return None
+    return epoch, d["message"].get("id"), tokens
+
+
+def scan_usage(path, entry, cutoff):
+    """Read only the lines appended since the last scan; transcripts are append-only.
+    Returns the updated cache entry, or None if the file can't be read."""
+    try:
+        st = os.stat(path)
+        valid = (isinstance(entry, dict) and entry.get("ino") == st.st_ino
+                 and isinstance(entry.get("off"), int) and 0 <= entry["off"] <= st.st_size
+                 and isinstance(entry.get("b"), dict)
+                 and (entry.get("last") is None or isinstance(entry["last"], list)))
+        if not valid:
+            entry = {"ino": st.st_ino, "off": 0, "last": None, "b": {}}
+        buckets = {}
+        for k, v in entry["b"].items():
+            if str(k).isdigit() and isinstance(v, int) and int(k) + USAGE_BUCKET > cutoff:
+                buckets[str(k)] = v
+        entry["b"] = buckets
+        last_id, last_tokens = (entry["last"] + [None, 0])[:2] if entry["last"] else (None, 0)
+        with open(path, "rb") as f:
+            f.seek(entry["off"])
+            for line in f:  # line by line, so a huge transcript never sits in memory whole
+                if not line.endswith(b"\n"):
+                    break  # half-written last line: pick it up next time
+                entry["off"] += len(line)
+                u = usage_entry(line)
+                if not u:
+                    continue
+                epoch, msg_id, tokens = u
+                # A streamed reply repeats its message id on consecutive lines, sometimes with a
+                # higher final count, so only the increase is added.
+                if msg_id and msg_id == last_id:
+                    add, last_tokens = max(0, tokens - last_tokens), max(tokens, last_tokens)
+                else:
+                    add, last_id, last_tokens = tokens, msg_id, tokens
+                if add and epoch >= cutoff:
+                    bucket = str(epoch - epoch % USAGE_BUCKET)
+                    entry["b"][bucket] = entry["b"].get(bucket, 0) + add
+        entry["last"] = [last_id, last_tokens]
+        return entry
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def account_usage(now=None):
+    """{account: (tokens in the last 5h, tokens in the last 7 days)}, cached between refreshes."""
+    now = int(now or time.time())
+    cutoff = now - USAGE_WINDOW
+    five_from = now - 5 * 3600
+    try:
+        with open(USAGE_CACHE) as f:
+            cache = json.load(f)
+        files = cache["files"] if cache.get("v") == USAGE_CACHE_VERSION else {}
+        if not isinstance(files, dict):
+            files = {}
+    except (OSError, ValueError, KeyError, AttributeError, TypeError):
+        files = {}
+    fresh, totals = {}, {}
+    for d in config_dirs():
+        five = week = 0
+        for p in glob.glob(os.path.join(d, "projects", "**", "*.jsonl"), recursive=True):
+            try:
+                if os.path.getmtime(p) < cutoff:
+                    continue
+            except OSError:
+                continue
+            entry = scan_usage(p, files.get(p), cutoff)
+            if entry is None:
+                continue
+            fresh[p] = entry
+            for bucket, tokens in entry["b"].items():
+                week += tokens
+                if int(bucket) + USAGE_BUCKET > five_from:  # include the bucket straddling 5h ago
+                    five += tokens
+        if week:
+            name = account_name(d)
+            f5, w = totals.get(name, (0, 0))
+            totals[name] = (f5 + five, w + week)
+    try:
+        os.makedirs(os.path.dirname(USAGE_CACHE), exist_ok=True)
+        tmp = f"{USAGE_CACHE}.{os.getpid()}.tmp"  # per-process, so overlapping refreshes can't mix
+        with open(tmp, "w") as f:
+            json.dump({"v": USAGE_CACHE_VERSION, "files": fresh}, f)
+        os.replace(tmp, USAGE_CACHE)
+    except OSError:
+        pass
+    return totals
+
+
+def fmt_tokens(n):
+    if n >= 1e9:
+        return f"{n / 1e9:.1f}B"
+    if n >= 1e6:
+        return f"{n / 1e6:.1f}M"
+    if n >= 1e3:
+        return f"{n / 1e3:.0f}k"
+    return str(n)
+
+
 def same_session(pid, start):
     """The live process for pid, if it is still the session we showed; never the daemon or host."""
     if not str(pid).isdigit():
@@ -396,6 +523,17 @@ def render():
             print(f"--background service ({len(services)} proc) · "
                   f"{fmt_mb(sum(s['mb'] for s in services))} | color=gray")
     print("---")
+
+    try:
+        usage = account_usage()
+    except Exception:  # usage is a nice-to-have; never let it blank the session list
+        usage = {}
+    if usage:
+        print("Token usage   last 5h · 7 days | disabled=true")
+        for acct, (five, week) in sorted(usage.items(), key=lambda kv: -kv[1][1]):
+            print(f"{menu_text(acct)}   {fmt_tokens(five)} · {fmt_tokens(week)}"
+                  " | tooltip=Input + cache writes + output, from local transcripts. Cache reads excluded.")
+        print("---")
 
     herdr, workspaces = herdr_agents()
     if workspaces:

@@ -1,8 +1,13 @@
+import calendar
 import importlib.util
+import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PLUGIN = os.path.join(HERE, "..", "hivebar.30s.py")
@@ -98,6 +103,78 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(hivebar.level((9.0, 0, 0), 10, 60), "orange")
         self.assertEqual(hivebar.level((13.0, 0, 0), 10, 60), "red")
         self.assertEqual(hivebar.level((1.0, 0, 0), 10, 10), "red")
+
+
+def usage_line(msg_id, out, ts="2026-10-30T10:00:00.000Z"):
+    return json.dumps({"type": "assistant", "timestamp": ts, "message": {"id": msg_id, "usage": {
+        "input_tokens": 10, "cache_creation_input_tokens": 100,
+        "cache_read_input_tokens": 99999, "output_tokens": out}}}) + "\n"
+
+
+class UsageTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.path = os.path.join(self.tmp, "s.jsonl")
+        self.cutoff = calendar.timegm((2026, 10, 1, 0, 0, 0))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def total(self, entry):
+        return sum(entry["b"].values())
+
+    def test_counts_repeats_once_and_skips_cache_reads(self):
+        with open(self.path, "w") as f:
+            f.write(usage_line("a", 5) + usage_line("a", 7) + '{"type":"user"}\n' + usage_line("b", 1))
+        entry = hivebar.scan_usage(self.path, {}, self.cutoff)
+        self.assertEqual(self.total(entry), (110 + 7) + (110 + 1))
+
+    def test_incremental_and_partial_lines(self):
+        with open(self.path, "w") as f:
+            f.write(usage_line("a", 5) + usage_line("b", 5)[:20])  # second line half-written
+        entry = hivebar.scan_usage(self.path, {}, self.cutoff)
+        self.assertEqual(self.total(entry), 115)
+        with open(self.path, "w") as f:
+            f.write(usage_line("a", 5) + usage_line("b", 5))
+        entry = hivebar.scan_usage(self.path, entry, self.cutoff)
+        self.assertEqual(self.total(entry), 230)
+        self.assertEqual(self.total(hivebar.scan_usage(self.path, entry, self.cutoff)), 230)
+
+    def test_drops_old_entries(self):
+        with open(self.path, "w") as f:
+            f.write(usage_line("a", 5, ts="2026-09-01T00:00:00Z") + usage_line("b", 5))
+        self.assertEqual(self.total(hivebar.scan_usage(self.path, {}, self.cutoff)), 115)
+
+    def test_bad_input_never_raises(self):
+        with open(self.path, "w") as f:
+            f.write('{"type":"assistant","timestamp":"2026-10-30T10:00:00Z","message":'
+                    '{"id":"x","usage":{"output_tokens":Infinity}}}\n' + usage_line("b", 5))
+        self.assertEqual(self.total(hivebar.scan_usage(self.path, {}, self.cutoff)), 115)
+        for junk in ({"ino": os.stat(self.path).st_ino, "off": 0}, {"b": {"x": "y"}}, "nope", None):
+            self.assertEqual(self.total(hivebar.scan_usage(self.path, junk, self.cutoff)), 115)
+        os.chmod(self.path, 0)
+        self.assertIsNone(hivebar.scan_usage(self.path, {}, self.cutoff))
+        self.assertIsNone(hivebar.scan_usage(os.path.join(self.tmp, "gone.jsonl"), {}, self.cutoff))
+
+    def test_account_usage_round_trip(self):
+        now = calendar.timegm((2026, 10, 30, 12, 0, 0))
+        for acct, ts in (("work", "2026-10-30T10:00:00Z"), ("old", "2026-10-29T10:00:00Z")):
+            os.makedirs(os.path.join(self.tmp, f".claude-{acct}", "projects", "p"))
+            with open(os.path.join(self.tmp, f".claude-{acct}", "projects", "p", "s.jsonl"), "w") as f:
+                f.write(usage_line("a", 5, ts=ts))
+        cache = os.path.join(self.tmp, "cache", "usage.json")
+        with mock.patch.object(hivebar, "HOME", self.tmp), mock.patch.object(hivebar, "USAGE_CACHE", cache):
+            first = hivebar.account_usage(now)
+            with open(cache, "w") as f:
+                f.write("[1, 2")  # corrupt cache: rescan, don't crash
+            self.assertEqual(hivebar.account_usage(now), first)
+            self.assertEqual(hivebar.account_usage(now), first)
+        self.assertEqual(first, {"work": (115, 115), "old": (0, 115)})
+
+    def test_fmt_tokens(self):
+        self.assertEqual(hivebar.fmt_tokens(950), "950")
+        self.assertEqual(hivebar.fmt_tokens(12_300), "12k")
+        self.assertEqual(hivebar.fmt_tokens(4_560_000), "4.6M")
 
 
 class StopGuardTest(unittest.TestCase):
