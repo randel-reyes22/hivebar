@@ -4,7 +4,7 @@ See every Claude Code session on your Mac at a glance, across all your accounts,
 
 Hivebar is a [SwiftBar](https://swiftbar.app) plugin. When you run many coding agents at once, sessions pile up quietly: tabs you forgot about, background agents from last week, sessions still on an old CLI version. Each one holds a few hundred MB, and together they push your Mac into swap. Hivebar makes them visible and lets you stop them.
 
-<img src="docs/menu.png" width="417" alt="Hivebar menu: system load, Claude Code sessions per account, plan usage per account, Herdr agents">
+<img src="docs/menu.png" width="365" alt="Hivebar menu: Claude Code sessions per account, plan usage per account, Herdr agents, system load">
 
 <sub>Screenshot from demo mode (`HIVEBAR_DEMO=1`): accounts and projects are made up.</sub>
 
@@ -12,7 +12,7 @@ Hivebar is a [SwiftBar](https://swiftbar.app) plugin. When you run many coding a
 
 - **Every session, however it was started:** interactive terminals, background agents (`claude --bg`), and sessions still running an older CLI binary.
 - **Grouped by account.** If you run several Claude accounts side by side with `CLAUDE_CONFIG_DIR` (for example `~/.claude-work` and `~/.claude-personal`), each session is labelled with its account.
-- **Per-session details:** project (git worktrees show as `repo ⎇ worktree`), age, memory, and CPU including child processes. Tags mark `bg`, `idle` and `old vX.Y.Z` sessions.
+- **Per-session details:** project (git worktrees show as `repo ⎇ worktree`), age, memory, and CPU including child processes. Tags mark `background`, `idle` and `old vX.Y.Z` sessions.
 - **Stop sessions:**
   - **One session:** choose *Stop session* from its submenu, or hold **⌥ Option** while the menu is open to turn every row into a one-click *Stop*.
   - **A whole account:** *Stop all … sessions…*, with a confirmation dialog.
