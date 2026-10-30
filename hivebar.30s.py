@@ -809,8 +809,10 @@ def render():
         print(f"No idle sessions older than {hours}h | disabled=true")
     print('Open Activity Monitor | bash=/usr/bin/open param1=-a param2="Activity Monitor" terminal=false')
     print("Refresh | refresh=true")
-    # SwiftBar's own submenu is hidden above, so keep a way to quit it (hold Option).
-    print("Quit SwiftBar | bash=/usr/bin/pkill param1=-x param2=SwiftBar terminal=false alternate=true")
+    print("---")
+    # SwiftBar's own submenu is hidden above, so this is the way out. Hivebar runs inside
+    # SwiftBar, so quitting it quits SwiftBar; `open -a SwiftBar` brings it back.
+    print("Quit Hivebar | bash=/usr/bin/pkill param1=-x param2=SwiftBar terminal=false")
 
 
 if __name__ == "__main__":
