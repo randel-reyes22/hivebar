@@ -10,26 +10,36 @@ func symbol(_ name: String, _ points: CGFloat, _ weight: NSFont.Weight) -> NSIma
     return NSImage(systemSymbolName: name, accessibilityDescription: nil)!.withSymbolConfiguration(config)!
 }
 
-func render(_ color: NSColor) -> String {
+// Alert icons are a solid hexagon with a white asterisk, so they stay readable on any
+// wallpaper; the plain icon is an outline that macOS tints for light and dark menu bars.
+func render(_ color: NSColor, filled: Bool) -> String {
     let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size), pixelsHigh: Int(size),
                                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
                                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-    for (name, points, weight) in [("hexagon", size * 0.86, NSFont.Weight.medium),
-                                   ("asterisk", size * 0.40, NSFont.Weight.heavy)] {
+    let layers: [(String, CGFloat, NSFont.Weight, NSColor)] = filled
+        ? [("hexagon.fill", size * 0.86, .medium, color), ("asterisk", size * 0.40, .heavy, .white)]
+        : [("hexagon", size * 0.86, .medium, color), ("asterisk", size * 0.40, .heavy, color)]
+    for (name, points, weight, tint) in layers {
         let img = symbol(name, points, weight)
         let rect = NSRect(x: (size - img.size.width) / 2, y: (size - img.size.height) / 2,
                           width: img.size.width, height: img.size.height)
         img.draw(in: rect)
-        color.set()
-        rect.fill(using: .sourceAtop)
+        let layer = NSImage(size: img.size, flipped: false) { r in
+            img.draw(in: r)
+            tint.set()
+            r.fill(using: .sourceAtop)
+            return true
+        }
+        layer.draw(in: rect)
     }
     NSGraphicsContext.restoreGraphicsState()
     rep.size = NSSize(width: size / 2, height: size / 2)  // mark as @2x so it shows at 18pt
     return rep.representation(using: .png, properties: [:])!.base64EncodedString()
 }
 
-for (key, color) in [("template", NSColor.black), ("orange", NSColor.systemOrange), ("red", NSColor.systemRed)] {
-    print("    \"\(key)\": \"\(render(color))\",")
+for (key, color, filled) in [("template", NSColor.black, false), ("orange", NSColor.systemOrange, true),
+                             ("red", NSColor.systemRed, true)] {
+    print("    \"\(key)\": \"\(render(color, filled: filled))\",")
 }
