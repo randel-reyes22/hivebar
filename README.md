@@ -34,8 +34,7 @@ cd hivebar
 ./install.sh          # refresh every 30s; or e.g. ./install.sh 1m (add --no-login to skip login item)
 ```
 
-`install.sh` installs SwiftBar with Homebrew if it's missing and sets a plugin folder if you don't have one. It then symlinks the plugin there, so `git pull` updates it. To change the refresh interval, run `./install.sh <interval>` again. To remove Hivebar, run `./install.sh --uninstall`.
-
+`install.sh` installs SwiftBar with Homebrew if it's missing and sets a plugin folder if you don't have one. It then symlinks the plugin there, so `git pull` updates it. To change the refresh interval, run `./install.sh <interval>` again. To update, run `git pull`; SwiftBar picks up the change on its next refresh. To remove Hivebar, run `./install.sh --uninstall`; it also puts back any status lines that `setup-limits` changed.
 
 ### Finding it in the menu bar
 
@@ -46,11 +45,13 @@ If you don't see it:
 1. **Hidden behind the notch.** On MacBooks with a notch, menu-bar icons that don't fit are hidden. Hold **⌘ Command** and drag Hivebar to the right, or quit some other menu-bar apps.
 2. **SwiftBar isn't running.** Run `open -a SwiftBar`. The first time, macOS may ask whether to open an app downloaded from the internet; choose Open.
 3. **SwiftBar is using a different folder.** If SwiftBar asked you to choose a plugin folder, pick `~/.config/swiftbar-plugins`, or run `defaults read com.ameba.SwiftBar PluginDirectory` and rerun `./install.sh`.
-4. **Check the plugin itself:** `./hivebar.30s.py` should print the menu text. If it errors, please open an issue.
+4. **Python isn't installed yet.** On a fresh Mac, `python3` is only a placeholder until the Command Line Tools are installed. If `./hivebar.30s.py` asks to install developer tools, run `xcode-select --install`.
+5. **Check the plugin itself:** `./hivebar.30s.py` should print the menu text. If it shows an error, please open an issue.
 
 To close it, choose **Quit Hivebar** at the bottom of the menu (this quits SwiftBar, which runs it); `open -a SwiftBar` brings it back. `install.sh` also adds SwiftBar to your login items so Hivebar starts with your Mac (macOS may ask once to let your terminal control System Events). Skip that with `--no-login`, or remove it later in System Settings > General > Login Items.
 
 Then, optionally, run `./hivebar.30s.py setup-limits` to show each account's plan usage (see [Plan usage](#plan-usage)).
+
 ## Plan usage
 
 Claude Code passes your plan's limit percentages to its status line. Hivebar can sit in front of your status line, keep a copy of those numbers, and then run your own status line unchanged:
@@ -60,7 +61,7 @@ Claude Code passes your plan's limit percentages to its status line. Hivebar can
 ./hivebar.30s.py setup-limits --undo   # put your original status lines back
 ```
 
-Percentages update whenever a session in that account gets a reply, so an account you haven't used for a while shows how old its numbers are. Plans that don't report limits (API keys, for example) show token counts only.
+Percentages update whenever a session in that account gets a reply, so an account you haven't used for a while shows how old its numbers are. Plans that don't report limits (API keys, for example) show token counts only. If you add another account later, run `setup-limits` again.
 
 ## Settings
 
