@@ -31,7 +31,7 @@ Requirements: macOS, Python 3.9+ (included with Xcode Command Line Tools), Swift
 ```sh
 git clone https://github.com/steamboy/hivebar.git
 cd hivebar
-./install.sh          # refresh every 30s; or e.g. ./install.sh 1m
+./install.sh          # refresh every 30s; or e.g. ./install.sh 1m (add --no-login to skip login item)
 ```
 
 `install.sh` installs SwiftBar with Homebrew if it's missing and sets a plugin folder if you don't have one. It then symlinks the plugin there, so `git pull` updates it. To change the refresh interval, run `./install.sh <interval>` again. To remove Hivebar, run `./install.sh --uninstall`.
@@ -48,7 +48,7 @@ If you don't see it:
 3. **SwiftBar is using a different folder.** If SwiftBar asked you to choose a plugin folder, pick `~/.config/swiftbar-plugins`, or run `defaults read com.ameba.SwiftBar PluginDirectory` and rerun `./install.sh`.
 4. **Check the plugin itself:** `./hivebar.30s.py` should print the menu text. If it errors, please open an issue.
 
-To close it, choose **Quit Hivebar** at the bottom of the menu (this quits SwiftBar, which runs it); `open -a SwiftBar` brings it back. To start it automatically when you log in, open SwiftBar from Applications (while it's running this opens its settings) and turn on **Launch at Login**.
+To close it, choose **Quit Hivebar** at the bottom of the menu (this quits SwiftBar, which runs it); `open -a SwiftBar` brings it back. `install.sh` also adds SwiftBar to your login items so Hivebar starts with your Mac (macOS may ask once to let your terminal control System Events). Skip that with `--no-login`, or remove it later in System Settings > General > Login Items.
 
 Then, optionally, run `./hivebar.30s.py setup-limits` to show each account's plan usage (see [Plan usage](#plan-usage)).
 ## Plan usage
