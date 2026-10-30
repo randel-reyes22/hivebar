@@ -177,6 +177,119 @@ class UsageTest(unittest.TestCase):
         self.assertEqual(hivebar.fmt_tokens(4_560_000), "4.6M")
 
 
+class LimitsTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.patches = [mock.patch.object(hivebar, "HOME", self.tmp),
+                        mock.patch.object(hivebar, "LIMITS_DIR", os.path.join(self.tmp, "limits"))]
+        for p in self.patches:
+            p.start()
+
+    def tearDown(self):
+        for p in self.patches:
+            p.stop()
+        shutil.rmtree(self.tmp)
+
+    def payload(self):
+        return {"model": {"id": "x"}, "rate_limits": {
+            "five_hour": {"used_percentage": 42.4, "resets_at": 2000},
+            "seven_day": {"used_percentage": "junk", "resets_at": 3000}}}
+
+    def test_save_and_load(self):
+        hivebar.save_limits(self.payload(), os.path.join(self.tmp, ".claude-work"), now=1000)
+        hivebar.save_limits({"rate_limits": None}, os.path.join(self.tmp, ".claude-free"), now=1000)
+        self.assertEqual(hivebar.load_limits(),
+                         {"work": {"five_hour": {"used": 42.4, "resets_at": 2000}, "updated": 1000}})
+        self.assertEqual(hivebar.fmt_pct({"used": 42.4, "resets_at": 2000}, 1500), "42%")
+        self.assertEqual(hivebar.fmt_pct({"used": 42.4, "resets_at": 2000}, 2500), "0%")
+
+    def test_statusline_passes_through(self):
+        env = {**os.environ, "CLAUDE_CONFIG_DIR": os.path.join(self.tmp, ".claude-work")}
+        code = (f"import importlib.util,sys; s=importlib.util.spec_from_file_location('h',{PLUGIN!r});"
+                f"h=importlib.util.module_from_spec(s); s.loader.exec_module(h);"
+                f"h.LIMITS_DIR={os.path.join(self.tmp, 'limits')!r}; h.statusline(sys.argv[1])")
+        out = subprocess.run([sys.executable, "-c", code, "tr a-z A-Z"], input=b"not json", env=env,
+                             capture_output=True).stdout
+        self.assertEqual(out, b"NOT JSON")  # broken payload: still runs the user's status line
+
+    def test_setup_and_undo(self):
+        work = os.path.join(self.tmp, ".claude-work")
+        plain = os.path.join(self.tmp, ".claude-plain")
+        for d in (work, plain):
+            os.makedirs(os.path.join(d, "projects"))
+        with open(os.path.join(work, "settings.json"), "w") as f:
+            json.dump({"model": "x", "statusLine": {"type": "command", "command": "bash 'my line.sh'",
+                                                    "padding": 1}}, f)
+        with mock.patch("sys.stdout"):
+            hivebar.setup_limits()
+            hivebar.setup_limits()  # idempotent
+        with open(os.path.join(work, "settings.json")) as f:
+            cmd = json.load(f)["statusLine"]["command"]
+        self.assertEqual(hivebar.wrapped_command(cmd)[1], "bash 'my line.sh'")
+        with open(os.path.join(plain, "settings.json")) as f:
+            self.assertEqual(hivebar.wrapped_command(json.load(f)["statusLine"]["command"])[1], "")
+        with mock.patch("sys.stdout"):
+            hivebar.setup_limits(undo=True)
+        with open(os.path.join(work, "settings.json")) as f:
+            self.assertEqual(json.load(f), {"model": "x", "statusLine": {
+                "type": "command", "command": "bash 'my line.sh'", "padding": 1}})
+        with open(os.path.join(plain, "settings.json")) as f:
+            self.assertEqual(json.load(f), {})
+
+
+    def test_stale_session_cannot_lower_numbers(self):
+        work = os.path.join(self.tmp, ".claude-work")
+        fresh = {"rate_limits": {"five_hour": {"used_percentage": 60, "resets_at": 2000}}}
+        stale = {"rate_limits": {"five_hour": {"used_percentage": 20, "resets_at": 2000}}}
+        hivebar.save_limits(fresh, work, now=1000)
+        hivebar.save_limits(stale, work, now=1100)
+        self.assertEqual(hivebar.load_limits()["work"],
+                         {"five_hour": {"used": 60.0, "resets_at": 2000}, "updated": 1000})
+        nxt = {"rate_limits": {"five_hour": {"used_percentage": 5, "resets_at": 9000}}}
+        hivebar.save_limits(nxt, work, now=2100)  # new window: lower is right
+        self.assertEqual(hivebar.load_limits()["work"]["five_hour"]["used"], 5.0)
+
+    def test_malformed_cache_is_ignored(self):
+        os.makedirs(hivebar.LIMITS_DIR)
+        with open(os.path.join(hivebar.LIMITS_DIR, "x.json"), "w") as f:
+            json.dump({"updated": 1, "five_hour": {"used": "a"}}, f)
+        self.assertEqual(hivebar.load_limits(), {})
+
+    def test_setup_keeps_symlink_mode_and_skips_non_objects(self):
+        work = os.path.join(self.tmp, ".claude-work")
+        odd = os.path.join(self.tmp, ".claude-odd")
+        for d in (work, odd):
+            os.makedirs(os.path.join(d, "projects"))
+        real = os.path.join(self.tmp, "dotfiles.json")
+        with open(real, "w") as f:
+            json.dump({"name": "é"}, f)
+        os.chmod(real, 0o600)
+        os.symlink(real, os.path.join(work, "settings.json"))
+        with open(os.path.join(odd, "settings.json"), "w") as f:
+            f.write("[]")
+        with mock.patch("sys.stdout"):
+            hivebar.setup_limits()
+            hivebar.setup_limits(undo=True)
+        self.assertTrue(os.path.islink(os.path.join(work, "settings.json")))
+        self.assertEqual(os.stat(real).st_mode & 0o777, 0o600)
+        with open(real) as f:
+            self.assertIn("é", f.read())
+        with open(os.path.join(odd, "settings.json")) as f:
+            self.assertEqual(f.read(), "[]")
+
+    def test_usage_lines(self):
+        now = 1000
+        lines = hivebar.usage_lines({"api": (5, 9000)}, {}, now)
+        self.assertIn("api   tokens 5 · 9k", lines[1])
+        self.assertTrue(lines[0].endswith("disabled=true"))
+        limits = {"work": {"five_hour": {"used": 92.0, "resets_at": 2000},
+                           "seven_day": {"used": 99.0, "resets_at": 500}, "updated": 900}}
+        lines = hivebar.usage_lines({"api": (5, 9000)}, limits, now)
+        self.assertTrue(lines[1].startswith("work   5h 92% · week 0% | color=red"), lines[1])
+        self.assertTrue(any(l.startswith("api   tokens") for l in lines))
+        self.assertEqual(hivebar.usage_lines({}, {}, now), [])
+
+
 class StopGuardTest(unittest.TestCase):
     def test_rejects_non_numeric_pid(self):
         self.assertIsNone(hivebar.same_session("1; rm -rf /", None))

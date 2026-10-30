@@ -19,9 +19,10 @@ personal — 3 session(s) · 1.2 GB                   ▸
    ──────────
    Stop all 3 personal sessions…
 ──────────────────────────────────────────────────────
-Token usage   last 5h · 7 days
-personal   1.4M · 26.1M
-work   0 · 14.6M
+Plan usage   5h · week
+personal   5h 42% · week 18%                       ▸  5-hour limit resets 15:10
+work   5h 3% · week 61%                               Weekly limit resets Tue 09:00
+                                                      Updated 2m ago
 ──────────────────────────────────────────────────────
 Herdr agents                                       ▸
 ──────────────────────────────────────────────────────
@@ -37,7 +38,8 @@ Stop 1 idle session(s) older than 24h…
   - **One session:** choose *Stop session* from its submenu, or hold **⌥ Option** while the menu is open to turn every row into a one-click *Stop*.
   - **A whole account:** *Stop all … sessions…*, with a confirmation dialog.
   - **Everything idle:** *Stop idle sessions older than 24h…*, with a confirmation dialog.
-- **Token usage per account:** tokens used in the last 5 hours and the last 7 days, read from each account's local transcripts. The count is input plus cache writes plus output; cache reads are left out because they are cheap and would swamp the total. This is not your plan's limit percentage, which only Anthropic's servers know (run `/usage` in Claude Code for that).
+- **Plan usage per account:** the same 5-hour and weekly percentages as `/usage`, for every account, colored orange from 75% and red from 90%. Each account's submenu shows when its limits reset. Turn it on once with `./hivebar.30s.py setup-limits` (see below).
+- **Token usage per account:** tokens used in the last 5 hours and 7 days, read from local transcripts (input + cache writes + output; cache reads are left out because they would swamp the total).
 - **System health:** CPU load against your core count, free memory and swap. The icon turns orange under heavy load and red when the machine is overloaded.
 - **[Herdr](https://herdr.dev) integration (optional):** if Herdr is installed, its workspaces and agent status (working, done, idle) are listed too.
 
@@ -54,6 +56,17 @@ cd hivebar
 ```
 
 `install.sh` installs SwiftBar with Homebrew if it's missing and sets a plugin folder if you don't have one. It then symlinks the plugin there, so `git pull` updates it. To change the refresh interval, run `./install.sh <interval>` again. To remove Hivebar, run `./install.sh --uninstall`.
+
+## Plan usage
+
+Claude Code passes your plan's limit percentages to its status line. Hivebar can sit in front of your status line, keep a copy of those numbers, and then run your own status line unchanged:
+
+```sh
+./hivebar.30s.py setup-limits          # every ~/.claude* account; backs up settings.json first
+./hivebar.30s.py setup-limits --undo   # put your original status lines back
+```
+
+Percentages update whenever a session in that account gets a reply, so an account you haven't used for a while shows how old its numbers are. Plans that don't report limits (API keys, for example) show token counts only.
 
 ## Settings
 
@@ -72,6 +85,7 @@ Every refresh, Hivebar reads local process information only:
 - The process environment gives each session's `CLAUDE_CONFIG_DIR`, which identifies its account.
 - `lsof` gives each session's working directory.
 - `sysctl` and `memory_pressure` give memory and swap.
+- Plan percentages come from Claude Code's status-line input, saved to `~/Library/Caches/hivebar/limits/<account>.json` (percentages and reset times only).
 - Token counts come from the transcripts in `~/.claude*/projects/`. Only lines added since the last refresh are read, and running totals are cached in `~/Library/Caches/hivebar/usage.json` (token counts and file paths only, no conversation text).
 
 **Safety checks before stopping anything.** Hivebar re-checks, at the moment you click and again after a confirmation dialog, that the process:

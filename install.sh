@@ -12,6 +12,8 @@ SRC="$(CDPATH= cd -- "$(dirname -- "$0")" >/dev/null && pwd)/hivebar.30s.py"
 dir="$(defaults read com.ameba.SwiftBar PluginDirectory 2>/dev/null || true)"
 
 if [ "${1:-}" = "--uninstall" ]; then
+  # Status lines point at this checkout; put the originals back before it can be deleted.
+  python3 "$SRC" setup-limits --undo || true
   [ -n "$dir" ] || { echo "SwiftBar has no plugin folder set; nothing to remove."; exit 0; }
   removed=0
   for f in "$dir"/hivebar.*.py; do

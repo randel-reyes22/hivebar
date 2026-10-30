@@ -26,6 +26,7 @@ import glob
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -45,6 +46,9 @@ USAGE_CACHE = os.path.join(HOME, "Library/Caches/hivebar/usage.json")
 USAGE_WINDOW = 7 * 86400
 USAGE_BUCKET = 600
 USAGE_CACHE_VERSION = 1
+# Plan limits (5-hour and weekly %) as Claude Code hands them to its status line; see `statusline`.
+LIMITS_DIR = os.path.join(HOME, "Library/Caches/hivebar/limits")
+STATUSLINE_TIMEOUT = 30
 
 
 def env_number(name, default):
@@ -371,6 +375,217 @@ def account_usage(now=None):
     return totals
 
 
+def valid_window(w):
+    return (isinstance(w, dict) and isinstance(w.get("used"), (int, float))
+            and isinstance(w.get("resets_at"), int))
+
+
+def read_limits(path):
+    try:
+        with open(path) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(d, dict) or not isinstance(d.get("updated"), int):
+        return None
+    return {k: v for k, v in d.items() if k == "updated" or valid_window(v)}
+
+
+def save_limits(status, config_dir, now=None):
+    """Keep the rate_limits part of a status-line payload, per account. Percentages only."""
+    limits = status.get("rate_limits") if isinstance(status, dict) else None
+    if not isinstance(limits, dict):
+        return
+    os.makedirs(LIMITS_DIR, exist_ok=True)
+    path = os.path.join(LIMITS_DIR, f"{account_name(config_dir)}.json")
+    # Several sessions in one account report; an idle one may still hold older numbers.
+    # Usage never drops within a window, so keep the later window, or the higher % in the same one.
+    keep = read_limits(path) or {}
+    changed = False
+    for window in ("five_hour", "seven_day"):
+        w = limits.get(window)
+        try:
+            new = {"used": float(w["used_percentage"]), "resets_at": int(w["resets_at"])}
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        old = keep.get(window)
+        if (not old or new["resets_at"] > old["resets_at"]
+                or (new["resets_at"] == old["resets_at"] and new["used"] > old["used"])):
+            keep[window] = new
+            changed = True
+        elif new["resets_at"] == old["resets_at"] and new["used"] == old["used"]:
+            changed = True  # same numbers, freshly confirmed
+    if not changed:
+        return
+    keep["updated"] = int(now or time.time())
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w") as f:
+        json.dump(keep, f)
+    os.replace(tmp, path)
+
+
+def load_limits():
+    """{account: saved limits} from what each account's status line last reported."""
+    out = {}
+    for path in glob.glob(os.path.join(LIMITS_DIR, "*.json")):
+        d = read_limits(path)
+        if d and len(d) > 1:
+            out[os.path.basename(path)[:-len(".json")]] = d
+    return out
+
+
+def statusline(then):
+    """Status-line mode: save the plan limits, then hand the payload to the user's own status
+    line (if any) and print its output. Never fails, so the status line can't break."""
+    raw = sys.stdin.buffer.read()
+    try:
+        save_limits(json.loads(raw), os.environ.get("CLAUDE_CONFIG_DIR"))
+    except Exception:
+        pass
+    if not then:
+        return
+    try:
+        proc = subprocess.Popen(["/bin/sh", "-c", then], stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, start_new_session=True)
+    except OSError:
+        return
+    try:
+        out, _ = proc.communicate(raw, timeout=STATUSLINE_TIMEOUT)
+        sys.stdout.buffer.write(out)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)  # the whole group, e.g. node behind npx
+        except OSError:
+            pass
+        proc.wait()
+
+
+def wrapped_command(cmd):
+    """(hivebar path, the user's original command) if cmd is a Hivebar wrapper, else None."""
+    try:
+        parts = shlex.split(cmd)
+    except ValueError:
+        return None
+    if len(parts) >= 2 and parts[0].endswith(".py") and "hivebar" in parts[0] and parts[1] == "statusline":
+        return parts[0], (parts[3] if len(parts) >= 4 and parts[2] == "--then" else "")
+    return None
+
+
+def write_settings(path, settings):
+    """Write in place of a symlink's target, keeping the file's permissions."""
+    path = os.path.realpath(path)
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w") as f:
+        json.dump(settings, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    if os.path.exists(path):
+        shutil.copymode(path, tmp)
+    else:
+        os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+
+
+def setup_limits(undo=False):
+    """Point every account's statusLine at Hivebar (wrapping any existing one), or undo that."""
+    me = os.path.realpath(__file__)
+    for d in config_dirs():
+        acct, path = account_name(d), os.path.join(d, "settings.json")
+        try:
+            with open(path) as f:
+                settings = json.load(f)
+        except FileNotFoundError:
+            settings = {}
+        except (OSError, ValueError) as e:
+            print(f"{acct}: skipped, can't read settings.json ({e})")
+            continue
+        if not isinstance(settings, dict):
+            print(f"{acct}: skipped, settings.json isn't a JSON object")
+            continue
+        current = settings.get("statusLine")
+        cmd = current.get("command", "") if isinstance(current, dict) else ""
+        wrapped = wrapped_command(cmd) if isinstance(cmd, str) else None
+        if undo:
+            if wrapped is None:
+                print(f"{acct}: not set up, nothing to undo")
+                continue
+            if wrapped[1]:
+                settings["statusLine"] = {**current, "command": wrapped[1]}
+            else:
+                settings.pop("statusLine", None)
+        else:
+            if wrapped is not None:
+                if wrapped[0] == me:
+                    print(f"{acct}: already set up")
+                    continue
+                cmd = wrapped[1]  # set up from an old location: re-point it here
+            elif current is not None and not (isinstance(current, dict) and current.get("type") == "command"
+                                              and isinstance(cmd, str)):
+                print(f"{acct}: skipped, statusLine isn't a command")
+                continue
+            new = f"{shlex.quote(me)} statusline" + (f" --then {shlex.quote(cmd)}" if cmd else "")
+            settings["statusLine"] = {**(current or {"type": "command"}), "command": new}
+            backup = path + ".bak-hivebar"
+            if os.path.exists(path) and not os.path.exists(backup):
+                shutil.copy2(path, backup)  # the pre-Hivebar original; never overwritten
+        write_settings(path, settings)
+        print(f"{acct}: {'restored' if undo else 'set up'} ({path})")
+    if not undo:
+        print("Percentages appear once each account's session makes its next request.")
+
+
+def fmt_pct(window, now):
+    """'42%', or '0%' once the window has reset since it was reported."""
+    if not window:
+        return "–"
+    return "0%" if window["resets_at"] <= now else f"{window['used']:.0f}%"
+
+
+def fmt_reset(epoch, now):
+    t = time.localtime(epoch)
+    if epoch - now < 86400:
+        return time.strftime("%H:%M", t)
+    return time.strftime("%a %H:%M", t)
+
+
+def usage_lines(usage, limits, now):
+    """Menu lines for plan % and token usage per account."""
+    out = []
+    if not (usage or limits):
+        return out
+    tooltip = " tooltip=Input + cache writes + output, from local transcripts. Cache reads excluded."
+
+    def worst(acct):
+        lim = limits.get(acct, {})
+        return max([0] + [lim[w]["used"] for w in ("five_hour", "seven_day")
+                          if lim.get(w) and lim[w]["resets_at"] > now])
+
+    out.append(("Plan usage   5h · week" if limits else "Token usage   last 5h · 7 days") + " | disabled=true")
+    for acct in sorted(set(usage) | set(limits), key=lambda a: (-worst(a), a)):
+        five, week = usage.get(acct, (0, 0))
+        tokens = f"{fmt_tokens(five)} · {fmt_tokens(week)}"
+        lim = limits.get(acct)
+        if not lim:
+            # No plan limits reported (not set up yet, or an API-key account): tokens inline.
+            out.append(f"{menu_text(acct)}   tokens {tokens} |{tooltip}")
+            continue
+        pct = worst(acct)
+        color = " | color=red" if pct >= 90 else " | color=orange" if pct >= 75 else ""
+        out.append(f"{menu_text(acct)}   5h {fmt_pct(lim.get('five_hour'), now)} · "
+                   f"week {fmt_pct(lim.get('seven_day'), now)}{color}")
+        for key, label in (("five_hour", "5-hour"), ("seven_day", "Weekly")):
+            w = lim.get(key)
+            if w and w["resets_at"] > now:
+                out.append(f"--{label} limit resets {fmt_reset(w['resets_at'], now)} | disabled=true")
+        out.append(f"--Updated {fmt_age(int(now - lim['updated']))} ago (refreshes while a session is open)"
+                   " | disabled=true")
+        out.append(f"--Tokens: {fmt_tokens(five)} last 5h · {fmt_tokens(week)} last 7 days | disabled=true")
+    if not limits:
+        out.append("Show plan % (5h and weekly limits)…")
+        out.append("--Run once: ./hivebar.30s.py setup-limits | disabled=true")
+    out.append("---")
+    return out
+
+
 def fmt_tokens(n):
     if n >= 1e9:
         return f"{n / 1e9:.1f}B"
@@ -528,12 +743,11 @@ def render():
         usage = account_usage()
     except Exception:  # usage is a nice-to-have; never let it blank the session list
         usage = {}
-    if usage:
-        print("Token usage   last 5h · 7 days | disabled=true")
-        for acct, (five, week) in sorted(usage.items(), key=lambda kv: -kv[1][1]):
-            print(f"{menu_text(acct)}   {fmt_tokens(five)} · {fmt_tokens(week)}"
-                  " | tooltip=Input + cache writes + output, from local transcripts. Cache reads excluded.")
-        print("---")
+    try:
+        for line in usage_lines(usage, load_limits(), time.time()):
+            print(line)
+    except Exception:  # never let a malformed cache blank the session list
+        pass
 
     herdr, workspaces = herdr_agents()
     if workspaces:
@@ -572,5 +786,9 @@ if __name__ == "__main__":
         stop_idle()
     elif cmd == "stop-account" and args:
         stop_account(args[0])
+    elif cmd == "statusline":
+        statusline(args[1] if len(args) >= 2 and args[0] == "--then" else "")
+    elif cmd == "setup-limits":
+        setup_limits(undo="--undo" in args)
     else:
         render()
