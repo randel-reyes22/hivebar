@@ -534,9 +534,10 @@ def setup_limits(undo=False):
 
 
 def fmt_pct(window, now):
-    """'42%', or '0%' once the window has reset since it was reported."""
+    """'42%', or '0%' once the window has reset or wasn't reported (Claude Code omits an
+    unused window)."""
     if not window:
-        return "–"
+        return "0%"
     return "0%" if window["resets_at"] <= now else f"{window['used']:.0f}%"
 
 
