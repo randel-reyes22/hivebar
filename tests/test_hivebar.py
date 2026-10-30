@@ -1,5 +1,6 @@
 import calendar
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -59,6 +60,11 @@ class ParsingTest(unittest.TestCase):
         self.assertEqual(hivebar.project_label(HOME), "~")
         self.assertEqual(hivebar.project_label("/"), "/")
         self.assertEqual(hivebar.project_label(""), "?")
+
+    def test_plural(self):
+        self.assertEqual(hivebar.plural(1, "session"), "1 session")
+        self.assertEqual(hivebar.plural(0, "idle session"), "0 idle sessions")
+        self.assertEqual(hivebar.plural(3, "process"), "3 processes")
 
     def test_menu_text_is_safe(self):
         for raw in ("a|b", "--scratch", "---", "x\ny"):
@@ -280,14 +286,27 @@ class LimitsTest(unittest.TestCase):
     def test_usage_lines(self):
         now = 1000
         lines = hivebar.usage_lines({"api": (5, 9000)}, {}, now)
-        self.assertIn("api   tokens 5 · 9k", lines[1])
-        self.assertTrue(lines[0].endswith("disabled=true"))
+        self.assertIn("api · tokens 5 · 9k", lines[1])
+        self.assertIn("disabled=true", lines[0])
         limits = {"work": {"five_hour": {"used": 92.0, "resets_at": 2000},
                            "seven_day": {"used": 99.0, "resets_at": 500}, "updated": 900}}
         lines = hivebar.usage_lines({"api": (5, 9000)}, limits, now)
-        self.assertTrue(lines[1].startswith("work   5h 92% · week 0% | color=red"), lines[1])
-        self.assertTrue(any(l.startswith("api   tokens") for l in lines))
+        self.assertTrue(lines[1].startswith("work · 5h 92% · week 0% | color=red"), lines[1])
+        self.assertTrue(any(l.startswith("api · tokens") for l in lines))
         self.assertEqual(hivebar.usage_lines({}, {}, now), [])
+
+
+class RenderTest(unittest.TestCase):
+    def test_demo_menu_order_and_labels(self):
+        with mock.patch.object(hivebar, "DEMO", True), mock.patch("sys.stdout", new=io.StringIO()) as out:
+            hivebar.render()
+        menu = out.getvalue()
+        heads = ["Claude sessions", "Plan usage", "Herdr agents", "CPU load", "Quit Hivebar"]
+        self.assertEqual([menu.index(h) for h in heads], sorted(menu.index(h) for h in heads))
+        self.assertNotIn("(s)", menu)
+        self.assertNotIn("[bg", menu)
+        # Each line has at most one '|' so SwiftBar reads every param.
+        self.assertTrue(all(line.count("|") <= 1 for line in menu.splitlines()), menu)
 
 
 class StopGuardTest(unittest.TestCase):
