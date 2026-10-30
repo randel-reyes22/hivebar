@@ -122,6 +122,11 @@ def fmt_mb(mb):
     return f"{mb / 1024:.1f} GB" if mb >= 1024 else f"{mb:.0f} MB"
 
 
+def plural(n, word):
+    """'1 session', '2 sessions', '3 processes'."""
+    return f"{n} {word}" if n == 1 else f"{n} {word}{'es' if word.endswith('s') else 's'}"
+
+
 def short_path(p):
     return "~" + p[len(HOME):] if p and p.startswith(HOME) else (p or "?")
 
@@ -555,25 +560,25 @@ def usage_lines(usage, limits, now):
     out = []
     if not (usage or limits):
         return out
-    tooltip = " tooltip=Input + cache writes + output, from local transcripts. Cache reads excluded."
+    tooltip = ' tooltip="Input + cache writes + output, from local transcripts. Cache reads excluded."'
 
     def worst(acct):
         lim = limits.get(acct, {})
         return max([0] + [lim[w]["used"] for w in ("five_hour", "seven_day")
                           if lim.get(w) and lim[w]["resets_at"] > now])
 
-    out.append(("Plan usage   5h · week" if limits else "Token usage   last 5h · 7 days") + " | disabled=true")
+    out.append(("Plan usage" if limits else "Token usage") + " | disabled=true")
     for acct in sorted(set(usage) | set(limits), key=lambda a: (-worst(a), a)):
         five, week = usage.get(acct, (0, 0))
         tokens = f"{fmt_tokens(five)} · {fmt_tokens(week)}"
         lim = limits.get(acct)
         if not lim:
             # No plan limits reported (not set up yet, or an API-key account): tokens inline.
-            out.append(f"{menu_text(acct)}   tokens {tokens} |{tooltip}")
+            out.append(f"{menu_text(acct)} · tokens {tokens} |{tooltip}")
             continue
         pct = worst(acct)
         color = " | color=red" if pct >= 90 else " | color=orange" if pct >= 75 else ""
-        out.append(f"{menu_text(acct)}   5h {fmt_pct(lim.get('five_hour'), now)} · "
+        out.append(f"{menu_text(acct)} · 5h {fmt_pct(lim.get('five_hour'), now)} · "
                    f"week {fmt_pct(lim.get('seven_day'), now)}{color}")
         for key, label in (("five_hour", "5-hour"), ("seven_day", "Weekly")):
             w = lim.get(key)
@@ -682,12 +687,14 @@ def level(load, cores, free_pct):
     return None
 
 
-def action(label, *params):
-    """A menu line that re-runs this script. Params must be fixed verbs, numbers or SAFE_NAME."""
+def action(label, *params, sf=None):
+    """A menu line that re-runs this script. Params must be fixed verbs, numbers or SAFE_NAME.
+    sf names an SF Symbol to show beside the label."""
+    icon = f" sfimage={sf}" if sf else ""
     if DEMO:
-        return f"{label} | refresh=false"
+        return f"{label} | refresh=false{icon}"
     ps = " ".join(f'param{i}="{v}"' for i, v in enumerate(params, 1))
-    return f'{label} | bash="{SELF}" {ps} terminal=false refresh=true'
+    return f'{label} | bash="{SELF}" {ps} terminal=false refresh=true{icon}'
 
 
 def demo_data():
@@ -737,43 +744,41 @@ def render():
         print(f"{title} | templateImage={ICONS['template']}")
     print("---")
 
-    print(f"Load {load[0]:.1f} / {cores} cores  (5m {load[1]:.1f}, 15m {load[2]:.1f})"
-          + (f" | color={color}" if color else ""))
-    mem = f"{free_pct}% memory free · " if free_pct is not None else ""
-    print(f"{mem}swap {swap:.1f} GB used")
-    print("---")
-
-    print(f"Claude Code sessions: {len(visible)} · {fmt_mb(total_mb)} total   (hold ⌥ to stop)")
+    print(f"{plural(len(visible), 'Claude session')} · {fmt_mb(total_mb)} | disabled=true"
+          ' tooltip="Hold ⌥ Option to stop a session in one click"')
     for acct in sorted({s["account"] for s in sessions}):
         mine = [s for s in visible if s["account"] == acct]
         services = [s for s in sessions if s["account"] == acct and s["kind"] == "service"]
         mb = sum(s["mb"] for s in sessions if s["account"] == acct)
-        print(f"{menu_text(acct)} — {len(mine)} session(s) · {fmt_mb(mb)}")
+        print(f"{menu_text(acct)} · {plural(len(mine), 'session')} · {fmt_mb(mb)}")
         for s in sorted(mine, key=lambda s: s["age"]):
             tags = []
             if s["kind"] == "background":
-                tags.append("bg")
+                tags.append("background")
             if s["stale"]:
                 tags.append("idle")
             if s["outdated"]:
                 tags.append(f"old v{s['version']}")
-            tag = f"  [{', '.join(tags)}]" if tags else ""
+            tag = "".join(f" · {t}" for t in tags)
             gray = " | color=gray" if s["stale"] else ""
             label = menu_text(f"{project_label(s['cwd'])} · {fmt_age(s['age'])}")
             print(f"--{label} · {fmt_mb(s['mb'])} · {s['tree_cpu']:.0f}%{tag}{gray}")
-            print(action("----Stop session", "stop", s["pid"], s["start"]))
-            print(action("----Reveal folder", "reveal", s["pid"], s["start"]).replace("refresh=true", "refresh=false"))
+            print(action("----Stop session", "stop", s["pid"], s["start"], sf="stop.circle"))
+            print(action("----Reveal folder", "reveal", s["pid"], s["start"], sf="folder")
+                  .replace("refresh=true", "refresh=false"))
             print("-----")
             print(f"----{menu_text(short_path(s['cwd']))} | disabled=true")
             print(f"----PID {s['pid']} · {s['tty']} · {s['kind']} | disabled=true")
             # Holding Option swaps the row for a one-click Stop.
-            print(action(f"--Stop {label}", "stop", s["pid"], s["start"]) + " alternate=true")
+            print(action(f"--Stop {label}", "stop", s["pid"], s["start"], sf="stop.circle") + " alternate=true")
         if len(mine) > 1 and SAFE_NAME.match(acct):
             print("-----")
-            print(action(f"--Stop all {len(mine)} {acct} sessions…", "stop-account", acct))
+            print(action(f"--Stop all {len(mine)} {acct} sessions…", "stop-account", acct, sf="stop.circle"))
         if services:
-            print(f"--background service ({len(services)} proc) · "
+            print(f"--background service · {plural(len(services), 'process')} · "
                   f"{fmt_mb(sum(s['mb'] for s in services))} | color=gray")
+    if visible:
+        print("Hold ⌥ to stop in one click | disabled=true size=11")
     print("---")
 
     try:
@@ -790,29 +795,41 @@ def render():
     if workspaces:
         print("Herdr agents")
         for name, agents in workspaces:
-            line = f"--{menu_text(name)} — {len(agents)} agent(s)"
+            line = f"--{menu_text(name)} · {plural(len(agents), 'agent')}"
             if herdr and SAFE_NAME.match(name):
                 line += f' | bash="{herdr}" param1=session param2=attach param3="{name}" terminal=true'
             print(line)
             for a in agents:
                 status = str(a.get("agent_status", "?"))
-                icon = {"working": "⏳", "done": "✅", "idle": "💤"}.get(status, "🔔")
+                # Color only where it means something: done is good news, unknown needs a look.
+                icon = {"working": "hourglass", "done": "checkmark.circle sfcolor=green",
+                        "idle": "moon.zzz"}.get(status, "bell sfcolor=orange")
                 where = project_label(str(a.get("cwd", "")))
                 label = a.get("terminal_title_stripped") or where
-                print(f"----{icon} {menu_text(label)} · {menu_text(status)} · {menu_text(where)} | disabled=true")
+                print(f"----{menu_text(label)} · {menu_text(status)} · {menu_text(where)}"
+                      f" | disabled=true sfimage={icon}")
         print("---")
+
+    mem = f" · {free_pct}% memory free" if free_pct is not None else ""
+    print(f"CPU load {round(load[0] / cores * 100)}%{mem} · swap {swap:.1f} GB |"
+          + (f" color={color}" if color else "")
+          + f' tooltip="Load average {load[0]:.1f} / {load[1]:.1f} / {load[2]:.1f} (1, 5, 15 min)'
+          f' on {cores} cores"')
+    print("---")
 
     hours = STALE_SECS // 3600
     if stale:
-        print(action(f"Stop {len(stale)} idle session(s) older than {hours}h…", "stop-idle"))
+        print(action(f"Stop {plural(len(stale), 'idle session')} older than {hours}h…", "stop-idle",
+                     sf="moon.zzz"))
     else:
-        print(f"No idle sessions older than {hours}h | disabled=true")
-    print('Open Activity Monitor | bash=/usr/bin/open param1=-a param2="Activity Monitor" terminal=false')
-    print("Refresh | refresh=true")
+        print(f"No idle sessions older than {hours}h | disabled=true sfimage=moon.zzz")
+    print('Open Activity Monitor | bash=/usr/bin/open param1=-a param2="Activity Monitor" terminal=false'
+          " sfimage=waveform.path.ecg")
+    print("Refresh | refresh=true sfimage=arrow.clockwise")
     print("---")
     # SwiftBar's own submenu is hidden above, so this is the way out. Hivebar runs inside
     # SwiftBar, so quitting it quits SwiftBar; `open -a SwiftBar` brings it back.
-    print("Quit Hivebar | bash=/usr/bin/pkill param1=-x param2=SwiftBar terminal=false")
+    print("Quit Hivebar | bash=/usr/bin/pkill param1=-x param2=SwiftBar terminal=false sfimage=power")
 
 
 if __name__ == "__main__":

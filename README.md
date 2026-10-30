@@ -12,7 +12,7 @@ Hivebar is a [SwiftBar](https://swiftbar.app) plugin. When you run many coding a
 
 - **Every session, however it was started:** interactive terminals, background agents (`claude --bg`), and sessions still running an older CLI binary.
 - **Grouped by account.** If you run several Claude accounts side by side with `CLAUDE_CONFIG_DIR` (for example `~/.claude-work` and `~/.claude-personal`), each session is labelled with its account.
-- **Per-session details:** project (git worktrees show as `repo ⎇ worktree`), age, memory, and CPU including child processes. Tags mark `bg`, `idle` and `old vX.Y.Z` sessions.
+- **Per-session details:** project (git worktrees show as `repo ⎇ worktree`), age, memory, and CPU including child processes. Tags mark `background`, `idle` and `old vX.Y.Z` sessions.
 - **Stop sessions:**
   - **One session:** choose *Stop session* from its submenu, or hold **⌥ Option** while the menu is open to turn every row into a one-click *Stop*.
   - **A whole account:** *Stop all … sessions…*, with a confirmation dialog.
