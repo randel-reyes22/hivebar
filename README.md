@@ -4,7 +4,7 @@ See every Claude Code session on your Mac at a glance, across all your accounts,
 
 Hivebar is a [SwiftBar](https://swiftbar.app) plugin. When you run many coding agents at once, sessions pile up quietly: tabs you forgot about, background agents from last week, sessions still on an old CLI version. Each one holds a few hundred MB, and together they push your Mac into swap. Hivebar makes them visible and lets you stop them.
 
-<img src="docs/menu.png" width="417" alt="Hivebar menu: system load, Claude Code sessions per account, plan usage per account, Herdr agents">
+<img src="docs/menu.png" width="365" alt="Hivebar menu: Claude Code sessions per account, plan usage per account, Herdr agents, system load">
 
 <sub>Screenshot from demo mode (`HIVEBAR_DEMO=1`): accounts and projects are made up.</sub>
 
